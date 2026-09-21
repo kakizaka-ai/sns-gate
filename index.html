@@ -156,6 +156,8 @@
 
   .block { display: flex; flex-direction: column; gap: 8px; padding-top: 20px; border-top: 1px solid var(--line); }
   .block h2 { margin: 0; font-size: 13px; letter-spacing: 0.08em; color: var(--ink-muted); font-weight: 500; }
+  .prbig { margin: 0; font-size: 15px; }
+  .prbig b { font-size: 28px; font-weight: 600; }
   .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
   .stat { display: flex; flex-direction: column; gap: 0; }
   .stat b { font-size: 28px; font-weight: 600; line-height: 1.2; }
@@ -238,6 +240,19 @@
   <div class="sheet" id="more" hidden role="dialog" aria-label="記録と設定">
   <div class="wrap">
   <div class="sheetbar"><b>記録・設定</b><button type="button" class="moreBtn" id="moreClose">閉じる</button></div>
+
+  <section class="block">
+    <h2>習得状況</h2>
+    <p class="prbig"><b class="num" id="prDone">0</b> / <span class="num" id="prTotal">1000</span> 語 習得済み</p>
+    <div class="pbar" aria-hidden="true"><i id="prBar"></i></div>
+    <div class="stats">
+      <div class="stat"><b class="num" id="prReview">0</b><span>復習中（わからない）</span></div>
+      <div class="stat"><b class="num" id="prLearn">0</b><span>学習中（連続1〜2回）</span></div>
+      <div class="stat"><b class="num" id="prNew">0</b><span>まだ出ていない</span></div>
+      <div class="stat good"><b class="num" id="prCycles">0</b><span>全語習得の回数</span></div>
+    </div>
+    <p class="note">「わかる」を3回連続で選んだ語は「習得済み」になり、1000語すべてが習得済みになるまで出ません。すべて習得済みになると、最初からやり直します。</p>
+  </section>
 
   <section class="block">
     <h2>これまでの結果</h2>
@@ -671,6 +686,11 @@
   if ([30, 50, 100, 200].indexOf(cfg.need) < 0) cfg.need = 30;
   cfg.speak = cfg.speak === 0 ? 0 : 1;
   if (!cfg.review || typeof cfg.review !== 'object') cfg.review = {};
+  if (typeof cfg.cycles !== 'number') cfg.cycles = 0;
+  if (!cfg.prog || typeof cfg.prog !== 'object') {   // per-word streaks: { word: { s: consecutive "わかる", d: 1 when mastered } }
+    cfg.prog = {};
+    Object.keys(cfg.review).forEach(function (k) { cfg.prog[k] = { s: cfg.review[k].s || 0, d: 0 }; });
+  }
   if (!cfg.stats || typeof cfg.stats !== 'object') cfg.stats = {};
 
   var $ = function (id) { return document.getElementById(id); };
@@ -753,8 +773,10 @@
   var GRAD = 3, sinceRev = 0, nextRev = 3 + Math.floor(Math.random() * 2);
   var sid = function () { return cfg.session.start; };
   function eligibleReview() {
-    return WORDS.filter(function (w) { var r = cfg.review[w[0]]; return r && r.last !== sid(); });
+    return WORDS.filter(function (w) { var r = cfg.review[w[0]]; return r && r.last !== sid() && !isDone(w[0]); });
   }
+  function isDone(k) { var p = cfg.prog[k]; return !!(p && p.d); }
+  function doneCount() { return WORDS.filter(function (w) { return isDone(w[0]); }).length; }
   function nextQ(fromUser) {
     var w = null, n = 0;
     if (sinceRev >= nextRev) {
@@ -764,7 +786,8 @@
     while (!w) {
       if (oi >= order.length) { order = shuffle(order); oi = 0; }
       var c = WORDS[order[oi++]], r = cfg.review[c[0]];
-      if (r && r.last === sid() && ++n < 60) continue;   // missed or reviewed in this round: not again until the next one
+      // mastered words stay out; words missed or reviewed in this round wait for the next one
+      if ((isDone(c[0]) || (r && r.last === sid())) && ++n < WORDS.length * 2) continue;
       w = c;
     }
     if (cfg.review[w[0]]) { sinceRev = 0; nextRev = 3 + Math.floor(Math.random() * 2); } else sinceRev++;
@@ -773,11 +796,33 @@
     if (fromUser === true && cfg.speak) speak(w[0]);
   }
   function record(ok) {
-    var k = cur.w[0], r = cfg.review[k];
-    if (ok) { if (r) { r.s++; r.last = sid(); if (r.s >= GRAD) delete cfg.review[k]; } }
-    else if (r) { r.s = 0; r.m++; r.last = sid(); }
-    else cfg.review[k] = { m: 1, s: 0, last: sid() };
-    save(); renderReview();
+    var k = cur.w[0], p = cfg.prog[k] || (cfg.prog[k] = { s: 0, d: 0 }), r = cfg.review[k];
+    if (ok) {
+      p.s++;
+      if (r) { r.s = p.s; r.last = sid(); }
+      if (p.s >= GRAD) {
+        p.d = 1; delete cfg.review[k];
+        if (doneCount() >= WORDS.length) { cfg.cycles++; cfg.prog = {}; }   // every word mastered: start over
+      }
+    } else {
+      p.s = 0;
+      if (r) { r.s = 0; r.m++; r.last = sid(); } else cfg.review[k] = { m: 1, s: 0, last: sid() };
+    }
+    save(); renderReview(); renderProgress();
+  }
+  function renderProgress() {
+    var done = 0, rev = 0, learn = 0;
+    WORDS.forEach(function (w) {
+      var p = cfg.prog[w[0]];
+      if (p && p.d) done++;
+      else if (cfg.review[w[0]]) rev++;
+      else if (p) learn++;
+    });
+    $('prDone').textContent = done; $('prTotal').textContent = WORDS.length;
+    $('prBar').style.width = (done / WORDS.length * 100) + '%';
+    $('prReview').textContent = rev; $('prLearn').textContent = learn;
+    $('prNew').textContent = WORDS.length - done - rev - learn;
+    $('prCycles').textContent = cfg.cycles;
   }
   function renderReview() {
     var ks = Object.keys(cfg.review).filter(function (k) { return WORDS.some(function (w) { return w[0] === k; }); });
@@ -953,7 +998,7 @@
   $('moreClose').addEventListener('click', function () { setMore(false); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !$('more').hidden) setMore(false); });
   $('bankN').textContent = WORDS.length;
-  renderReview();
+  renderReview(); renderProgress();
   $('spkBtn').innerHTML = SPK_SVG; $('spkBtn').hidden = !canSpeak;
   $('spkBtn').addEventListener('click', function () { if (cur) speak(cur.w[0]); });
   if (canSpeak) {
