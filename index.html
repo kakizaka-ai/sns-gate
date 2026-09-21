@@ -88,6 +88,7 @@
 
   .top { display: flex; align-items: center; gap: 12px; }
   .ttl { flex: 1; min-width: 0; }
+  h1:empty { display: none; }
   h1 { margin: 0; font-size: 18px; line-height: 1.35; font-weight: 700; text-wrap: balance; }
   .lead { margin: 2px 0 0; color: var(--ink-muted); font-size: 12px; line-height: 1.4; }
   .moreBtn { flex: none; min-height: 40px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-size: 12.5px; cursor: pointer; }
@@ -203,7 +204,7 @@
       </div>
     </div>
     <div class="ttl">
-      <h1 id="headline">本当に、いま開く？</h1>
+      <h1 id="headline"></h1>
       <p class="lead" id="lead"></p>
     </div>
     <button type="button" class="moreBtn" id="moreBtn">記録・設定</button>
@@ -907,7 +908,7 @@
     $('mmss').textContent = mm; $('cap').textContent = cap;
 
     var head, lead;
-    if (m === 'wait') { head = '本当に、いま開く？'; lead = '単語' + s.need + '語に「わかる」と答え' + (s.wait ? '、' + waitLabel(s.wait) + '待つ' : 'る') + 'と開けます。'; }
+    if (m === 'wait') { head = ''; lead = '単語' + s.need + '語に「わかる」と答え' + (s.wait ? '、' + waitLabel(s.wait) + '待つ' : 'る') + 'と開けます。'; }
     else if (m === 'ready') { head = '条件を満たしました'; lead = 'それでも開きますか。開かなくても大丈夫です。'; }
     else if (m === 'quit') { head = 'やめました。いい判断です。'; lead = '浮いた時間で、TOEICのメニューを1つやりませんか。'; }
     else { head = '解除しています…'; lead = 'ショートカットが動くと、アプリが開きます。'; }
