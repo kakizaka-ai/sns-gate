@@ -125,6 +125,9 @@
   .exbase { margin: 0; font-size: 12px; color: var(--ink-muted); }
   .exjp { margin: 0; font-size: 13.5px; line-height: 1.4; color: var(--ink-muted); }
   .rvlist .re { grid-column: 1; font-size: 13px; }
+  .rvlist .undo { grid-column: 2; grid-row: 1 / span 6; align-self: center; min-height: 36px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-size: 13px; cursor: pointer; }
+  .rvlist .undo:hover { border-color: var(--ink-muted); }
+  #dnQ { width: 100%; margin-top: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; color: var(--ink); }
   .rvlist .rj { grid-column: 1; font-size: 12px; color: var(--ink-muted); }
   .judge { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .jbtn {
@@ -279,6 +282,15 @@
       <div class="stat good"><b class="num" id="stCorrect">0</b><span>今日 「わかる」にした単語</span></div>
     </div>
   </section>
+
+  <details id="doneBox">
+    <summary>習得済みの単語（<span class="num" id="dnN">0</span>語）</summary>
+    <p class="note">3回連続で「わかる」にした語です。「戻す」を押すと、習得前の状態に戻り、また出題されます。選んだ単語帳の語だけを表示します。</p>
+    <input type="search" id="dnQ" placeholder="単語で絞り込む" autocomplete="off" autocapitalize="off" aria-label="習得済みの単語を絞り込む">
+    <ul class="rvlist" id="dnList"></ul>
+    <p class="hint" id="dnMore"></p>
+    <button type="button" class="btn ghost" id="dnAll" style="margin-top:10px;min-height:44px">選んだ単語帳の習得済みをすべて戻す</button>
+  </details>
 
   <details id="reviewBox">
     <summary>わからなかった単語（<span class="num" id="rvN">0</span>語）</summary>
@@ -1524,12 +1536,20 @@
       var el = eligibleReview();
       if (el.length) w = el[Math.floor(Math.random() * el.length)];
     }
-    while (!w) {
-      if (oi >= order.length) { order = shuffle(order); oi = 0; }
-      var c = WORDS[order[oi++]], r = cfg.review[c[0]];
-      // mastered words stay out; words missed or reviewed in this round wait for the next one
-      if ((!inScope(c) || isDone(c[0]) || (r && r.last === sid())) && ++n < WORDS.length * 3) continue;
-      w = c;
+    if (!w) {
+      // Walk the shuffled order once: in scope, not mastered, and not missed/reviewed in this round.
+      for (var t = 0; t < order.length; t++) {
+        if (oi >= order.length) { order = shuffle(order); oi = 0; }
+        var c = WORDS[order[oi++]], r = cfg.review[c[0]];
+        if (inScope(c) && !isDone(c[0]) && !(r && r.last === sid()) && (!cur || !cur.w || cur.w[0] !== c[0])) { w = c; break; }
+      }
+    }
+    if (!w) {
+      // Only words already asked in this round are left: still stay inside the scope.
+      var rest = WORDS.filter(function (x) { return inScope(x) && !isDone(x[0]); });
+      var other = rest.filter(function (x) { return !cur || !cur.w || cur.w[0] !== x[0]; });
+      var pool = other.length ? other : rest;
+      w = pool[Math.floor(Math.random() * pool.length)];
     }
     if (cfg.review[w[0]]) { sinceRev = 0; nextRev = 3 + Math.floor(Math.random() * 2); } else sinceRev++;
     cur = { w: w, rev: !!cfg.review[w[0]] };
@@ -1564,7 +1584,7 @@
     $('prReview').textContent = rev; $('prLearn').textContent = learn;
     $('prNew').textContent = S.length - done - rev - learn;
     $('prCycles').textContent = cfg.cycles;
-    renderGenres();
+    renderGenres(); renderMastered();
   }
   function renderGenres() {
     var tot = {}, dn = {};
@@ -1594,6 +1614,31 @@
     }
     save(); sinceRev = 0; nextQ(); render(); renderGenres();
   });
+  var DN_LIMIT = 40, dnShown = DN_LIMIT, dnArm = 0;
+  function masteredList() {
+    var q = ($('dnQ').value || '').trim().toLowerCase();
+    return WORDS.filter(function (w) { return inSet(w) && isDone(w[0]) && (!q || w[0].toLowerCase().indexOf(q) >= 0 || w[2].indexOf(q) >= 0); });
+  }
+  function renderMastered() {
+    var all = WORDS.filter(function (w) { return inSet(w) && isDone(w[0]); });
+    $('dnN').textContent = all.length;
+    var L = masteredList(), d = document.createElement('div');
+    $('dnList').innerHTML = L.length ? L.slice(0, dnShown).map(function (w) {
+      d.textContent = w[2]; var mean = d.innerHTML; d.textContent = w[3] ? '/' + w[3] + '/' : ''; var ip = d.innerHTML; d.textContent = w[0]; var nm = d.innerHTML;
+      return '<li><span class="rw">' + nm + '<span class="rp">' + ip + '</span></span>' +
+        '<button type="button" class="undo" data-undo="' + nm + '" aria-label="' + nm + ' を習得前に戻す">戻す</button>' +
+        '<span class="rm">' + mean + '</span></li>';
+    }).join('') : '<li><span class="rs">' + (all.length ? '該当する語がありません。' : 'まだありません。') + '</span></li>';
+    $('dnMore').textContent = L.length > dnShown ? 'ほかに ' + (L.length - dnShown) + ' 語あります。単語で絞り込むか、下のボタンで続きを表示します。' : '';
+    $('dnAll').textContent = ($('dnQ').value.trim() ? '絞り込んだ ' : '選んだ単語帳の ') + L.length + ' 語をすべて戻す';
+    $('dnAll').disabled = !L.length; dnArm = 0;
+  }
+  function unmaster(keys) {
+    keys.forEach(function (k) { delete cfg.prog[k]; delete cfg.review[k]; });
+    save(); renderReview(); renderProgress(); renderMastered();
+    if (cur && cur.exhausted && !scopeDone()) { nextQ(); render(); }
+  }
+  function restoreOne(k) { unmaster([k]); }
   function renderReview() {
     var ks = Object.keys(cfg.review).filter(function (k) { return WORDS.some(function (w) { return w[0] === k; }); });
     $('rvN').textContent = ks.length;
@@ -1615,6 +1660,15 @@
         '<span class="rs">わからない ' + r.m + '回 ・ 連続で「わかる」 ' + r.s + ' / ' + GRAD + (r.last === sid() ? ' ・ 次の回から出題' : '') + '</span></li>';
     }).join('') : '<li><span class="rs">まだありません。</span></li>';
   }
+  $('dnQ').addEventListener('input', function () { dnShown = DN_LIMIT; renderMastered(); });
+  $('dnList').addEventListener('click', function (e) { var b = e.target.closest('[data-undo]'); if (b) restoreOne(b.getAttribute('data-undo')); });
+  $('dnMore').addEventListener('click', function () { dnShown += 200; renderMastered(); });
+  $('dnAll').addEventListener('click', function () {
+    var L = masteredList();
+    if (!L.length) return;
+    if (!dnArm) { dnArm = 1; $('dnAll').textContent = '本当に ' + L.length + ' 語を戻しますか？ もう一度押すと戻します'; return; }
+    unmaster(L.map(function (w) { return w[0]; }));
+  });
   $('rvList').addEventListener('click', function (e) { var b = e.target.closest('[data-say]'); if (b) speak(b.getAttribute('data-say')); });
   var AWAIT = '<span class="hint">ボタンを押し続けると、答えが見えます</span>';
   function relLine(k) {
